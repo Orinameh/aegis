@@ -18,6 +18,14 @@
 
 Aegis is a unified cloud-native cleanup utility that safely prunes Docker and Kubernetes resources while protecting critical components from accidental deletion.
 
+<p align="center">
+  <a href="https://github.com/Orinameh/aegis/actions"><img src="https://github.com/Orinameh/aegis/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Orinameh/aegis/releases"><img src="https://img.shields.io/github/v/release/Orinameh/aegis" alt="Release"></a>
+  <img src="https://img.shields.io/github/go-mod/go-version/Orinameh/aegis" alt="Go version">
+  <a href="https://go.dev/report"><img src="https://img.shields.io/badge/go%20report-A+-brightgreen" alt="Go Report"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Orinameh/aegis" alt="License: MIT"></a>
+</p>
+
 ## ✨ Features
 
 - **Docker Pruning**: Safely removes stopped containers, dangling images, and build cache

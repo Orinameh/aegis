@@ -36,7 +36,7 @@ func NewPruner(logger *zap.Logger, guard *guard.Guard) (*Pruner, error) {
 	defer cancel()
 
 	if _, err := cli.Ping(ctx, client.PingOptions{}); err != nil {
-		cli.Close()
+		_ = cli.Close()
 		return nil, fmt.Errorf("failed to ping Docker daemon: %w", err)
 	}
 

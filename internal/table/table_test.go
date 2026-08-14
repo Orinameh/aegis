@@ -21,8 +21,11 @@ func TestTableRender(t *testing.T) {
 	if len(lines) != 4 {
 		t.Fatalf("expected 4 lines (header, separator, 2 rows), got %d:\n%s", len(lines), out)
 	}
-	if lines[0] == strings.TrimRight(lines[0], " ") && strings.Contains(lines[0], " ") {
-		// header line should have padded cell separated by spaces
+	// The header's first cell must be padded to align with the longest name:
+	// "NAME" (4) padded to 11 (width of "longer-name") + 2-space column gap.
+	wantHeader := "NAME         SIZE"
+	if lines[0] != wantHeader {
+		t.Fatalf("expected header %q, got %q", wantHeader, lines[0])
 	}
 }
 

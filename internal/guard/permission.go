@@ -87,7 +87,7 @@ func (a *AuditLogger) writeToFile(entry *AuditEntry) {
 		a.logger.Error("failed to open audit log file", zap.Error(err))
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	ruleID := "none"
 	if entry.Rule != nil {
