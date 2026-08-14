@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,9 +50,15 @@ Subcommands:
   aegis check   - read-only disk usage check that notifies when over threshold
   aegis clean   - run the destructive cleanup with protection guards
   aegis review  - list/clear actions denied by protection that await review
+  aegis list    - read-only inventory of all Docker and Kubernetes resources
 
-Running bare 'aegis' is equivalent to 'aegis clean'.`,
+Running bare 'aegis' is equivalent to 'aegis clean'. 'aegis clean' cleans every
+enabled resource by default; pass a scope flag (e.g. --docker-only, --images-only,
+--pods-only) to clean only one kind of resource.`,
 	Version: version,
+	CompletionOptions: cobra.CompletionOptions{
+		DisableDefaultCmd: true,
+	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runClean(cmd); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -91,7 +98,12 @@ prompts for strict-protected resources and requires a confirmation showing the
 resource details before every deletion; use --auto-approve to skip prompts
 (use with caution). In non-interactive mode (--interactive=false) no prompts
 are shown and strict-protected resources are denied and queued for review
-instead of hanging.`,
+instead of hanging.
+
+By default every enabled resource is cleaned. Use a scope flag to clean only
+one kind of resource (k8s-only, images-only, containers-only, etc.). At most
+one scope flag may be set; scoping is purely CLI-side and does not change
+config.yaml.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runClean(cmd); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -128,9 +140,19 @@ in aligned tables. Performs no mutations, so it is safe to run at any time.
 }
 
 var (
-	reviewClear     bool
-	listDockerTypes []string
-	listK8sKinds    []string
+	reviewClear         bool
+	listDockerTypes     []string
+	listK8sKinds        []string
+	cleanDockerOnly     bool
+	cleanK8sOnly        bool
+	cleanImagesOnly     bool
+	cleanContainersOnly bool
+	cleanVolumesOnly    bool
+	cleanNetworksOnly   bool
+	cleanBuildCacheOnly bool
+	cleanPodsOnly       bool
+	cleanJobsOnly       bool
+	cleanPvcsOnly       bool
 )
 
 func init() {
@@ -148,6 +170,17 @@ func init() {
 	reviewCmd.Flags().BoolVar(&reviewClear, "clear", false, "empty the review queue")
 	listCmd.Flags().StringSliceVar(&listDockerTypes, "types", nil, "Docker resource types to list (containers, images, volumes, networks)")
 	listCmd.Flags().StringSliceVar(&listK8sKinds, "kinds", nil, "Kubernetes resource kinds to list (pods, jobs, pvcs)")
+
+	cleanCmd.Flags().BoolVar(&cleanDockerOnly, "docker-only", false, "clean only Docker resources")
+	cleanCmd.Flags().BoolVar(&cleanK8sOnly, "k8s-only", false, "clean only Kubernetes resources")
+	cleanCmd.Flags().BoolVar(&cleanImagesOnly, "images-only", false, "clean only unused Docker images")
+	cleanCmd.Flags().BoolVar(&cleanContainersOnly, "containers-only", false, "clean only stopped Docker containers")
+	cleanCmd.Flags().BoolVar(&cleanVolumesOnly, "volumes-only", false, "clean only unused Docker volumes")
+	cleanCmd.Flags().BoolVar(&cleanNetworksOnly, "networks-only", false, "clean only unused Docker networks")
+	cleanCmd.Flags().BoolVar(&cleanBuildCacheOnly, "build-cache-only", false, "clean only the Docker build cache")
+	cleanCmd.Flags().BoolVar(&cleanPodsOnly, "pods-only", false, "clean only failed/evicted Kubernetes pods")
+	cleanCmd.Flags().BoolVar(&cleanJobsOnly, "jobs-only", false, "clean only completed Kubernetes jobs")
+	cleanCmd.Flags().BoolVar(&cleanPvcsOnly, "pvcs-only", false, "clean only orphaned Kubernetes PVCs")
 }
 
 func main() {
@@ -304,6 +337,10 @@ func runClean(cmd *cobra.Command) error {
 		zap.Bool("dry_run", dryRun),
 		zap.String("config", cfgFile),
 	)
+
+	if err := applyCleanScope(cfg, log); err != nil {
+		return err
+	}
 
 	// Create context with cancellation and timeout
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
@@ -708,6 +745,127 @@ func executeCleanup(ctx context.Context, cfg *config.Config, log *zap.Logger, g 
 	}
 
 	return errors.Join(errs...)
+}
+
+// applyCleanScope narrows the cleanup based on the scope flags passed to
+// `aegis clean`. With no scope flag, nothing is changed and all enabled
+// resources are cleaned. With a scope flag, only that side/resource is
+// enabled. At most one scope flag may be set.
+func applyCleanScope(cfg *config.Config, log *zap.Logger) error {
+	var set []string
+	if cleanDockerOnly {
+		set = append(set, "docker-only")
+	}
+	if cleanK8sOnly {
+		set = append(set, "k8s-only")
+	}
+	if cleanImagesOnly {
+		set = append(set, "images-only")
+	}
+	if cleanContainersOnly {
+		set = append(set, "containers-only")
+	}
+	if cleanVolumesOnly {
+		set = append(set, "volumes-only")
+	}
+	if cleanNetworksOnly {
+		set = append(set, "networks-only")
+	}
+	if cleanBuildCacheOnly {
+		set = append(set, "build-cache-only")
+	}
+	if cleanPodsOnly {
+		set = append(set, "pods-only")
+	}
+	if cleanJobsOnly {
+		set = append(set, "jobs-only")
+	}
+	if cleanPvcsOnly {
+		set = append(set, "pvcs-only")
+	}
+
+	if len(set) == 0 {
+		return nil // clean all
+	}
+	if len(set) > 1 {
+		return fmt.Errorf("only one scope flag may be used, got: %s", strings.Join(set, ", "))
+	}
+
+	switch set[0] {
+	case "docker-only":
+		cfg.EnableDockerPrune = true
+		cfg.EnableK8sPrune = false
+	case "k8s-only":
+		cfg.EnableDockerPrune = false
+		cfg.EnableK8sPrune = true
+	case "images-only":
+		cfg.EnableDockerPrune = true
+		cfg.EnableK8sPrune = false
+		cfg.Docker.PruneDangling = true
+		cfg.Docker.PruneStopped = false
+		cfg.Docker.PruneBuildCache = false
+		cfg.Docker.PruneNetworks = false
+		cfg.Docker.PruneVolumes = false
+	case "containers-only":
+		cfg.EnableDockerPrune = true
+		cfg.EnableK8sPrune = false
+		cfg.Docker.PruneDangling = false
+		cfg.Docker.PruneStopped = true
+		cfg.Docker.PruneBuildCache = false
+		cfg.Docker.PruneNetworks = false
+		cfg.Docker.PruneVolumes = false
+	case "volumes-only":
+		cfg.EnableDockerPrune = true
+		cfg.EnableK8sPrune = false
+		cfg.Docker.PruneDangling = false
+		cfg.Docker.PruneStopped = false
+		cfg.Docker.PruneBuildCache = false
+		cfg.Docker.PruneNetworks = false
+		cfg.Docker.PruneVolumes = true
+	case "networks-only":
+		cfg.EnableDockerPrune = true
+		cfg.EnableK8sPrune = false
+		cfg.Docker.PruneDangling = false
+		cfg.Docker.PruneStopped = false
+		cfg.Docker.PruneBuildCache = false
+		cfg.Docker.PruneNetworks = true
+		cfg.Docker.PruneVolumes = false
+	case "build-cache-only":
+		cfg.EnableDockerPrune = true
+		cfg.EnableK8sPrune = false
+		cfg.Docker.PruneDangling = false
+		cfg.Docker.PruneStopped = false
+		cfg.Docker.PruneBuildCache = true
+		cfg.Docker.PruneNetworks = false
+		cfg.Docker.PruneVolumes = false
+	case "pods-only":
+		cfg.EnableDockerPrune = false
+		cfg.EnableK8sPrune = true
+		cfg.Kubernetes.DeleteFailedPods = true
+		cfg.Kubernetes.DeleteEvictedPods = true
+		cfg.Kubernetes.DeleteCompletedJobs = false
+		cfg.Kubernetes.DeleteSucceededJobs = false
+		cfg.Kubernetes.DeleteOrphanedPVCs = false
+	case "jobs-only":
+		cfg.EnableDockerPrune = false
+		cfg.EnableK8sPrune = true
+		cfg.Kubernetes.DeleteFailedPods = false
+		cfg.Kubernetes.DeleteEvictedPods = false
+		cfg.Kubernetes.DeleteCompletedJobs = true
+		cfg.Kubernetes.DeleteSucceededJobs = true
+		cfg.Kubernetes.DeleteOrphanedPVCs = false
+	case "pvcs-only":
+		cfg.EnableDockerPrune = false
+		cfg.EnableK8sPrune = true
+		cfg.Kubernetes.DeleteFailedPods = false
+		cfg.Kubernetes.DeleteEvictedPods = false
+		cfg.Kubernetes.DeleteCompletedJobs = false
+		cfg.Kubernetes.DeleteSucceededJobs = false
+		cfg.Kubernetes.DeleteOrphanedPVCs = true
+	}
+
+	log.Info("cleanup scoped", zap.String("scope", set[0]))
+	return nil
 }
 
 // convertCustomRules converts config rules to guard rules
