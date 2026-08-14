@@ -19,7 +19,7 @@
 Aegis is a unified cloud-native cleanup utility that safely prunes Docker and Kubernetes resources while protecting critical components from accidental deletion.
 
 <p align="center">
-  <a href="https://github.com/Orinameh/aegis/actions"><img src="https://github.com/Orinameh/aegis/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Orinameh/aegis/actions/workflows/ci.yaml"><img src="https://img.shields.io/github/actions/workflow/status/Orinameh/aegis/ci.yaml?branch=main&label=CI&logo=github" alt="CI"></a>
   <a href="https://github.com/Orinameh/aegis/releases"><img src="https://img.shields.io/github/v/release/Orinameh/aegis" alt="Release"></a>
   <img src="https://img.shields.io/github/go-mod/go-version/Orinameh/aegis" alt="Go version">
   <a href="https://go.dev/report"><img src="https://img.shields.io/badge/go%20report-A+-brightgreen" alt="Go Report"></a>
@@ -64,6 +64,35 @@ Aegis is a unified cloud-native cleanup utility that safely prunes Docker and Ku
    └─▶ auto-approve ──▶ delete (use with caution)
 ```
 
+## 📁 Project Structure
+
+```text
+aegis/
+├── cmd/aegis/               # CLI entrypoint (cobra)
+│   └── main.go              #   ─ check / clean / list / review subcommands
+├── internal/                # private Go packages (not importable outside)
+│   ├── banner/              #   ASCII-art banner printed at startup
+│   ├── config/              #   config loading, defaults, validation
+│   ├── docker/              #   Docker pruner (delete) + list.go (inventory)
+│   ├── k8s/                 #   Kubernetes sweeper (delete) + list.go (inventory)
+│   ├── guard/               #   protection guard, audit log, review queue
+│   ├── notify/              #   webhook notifications (Slack/Discord/ntfy)
+│   ├── system/              #   disk-usage checks
+│   └── table/               #   dependency-free ASCII table renderer
+├── pkg/logger/              # shared (importable) zap logger setup
+├── .github/
+│   ├── workflows/ci.yaml    #   GitHub Actions: build, test, lint, release
+│   ├── ISSUE_TEMPLATE/      #   bug & feature request templates
+│   └── PULL_REQUEST_TEMPLATE.md
+├── config.yaml              # example configuration (secrets go in config.local.yaml)
+├── Makefile                 # build, test, lint, install, release targets
+├── Dockerfile               # container image for in-cluster runs
+├── .golangci.yaml           # golangci-lint config (v2 format)
+├── SECURITY.md              # vulnerability reporting & threat model
+├── CONTRIBUTING.md          # contributor guide
+└── CODE_OF_CONDUCT.md       # community standards
+```
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -105,6 +134,56 @@ make build
 cp bin/aegis /usr/local/bin/
 ```
 
+### Running with Docker
+
+A prebuilt image is available and runs as a **non-root** user. The image is
+distroless (no shell, no package manager) and the runtime user is UID/GID `65532`
+(distroless's standard `nonroot` user), so the container has no privileges of its own.
+
+```bash
+docker run --rm -v "$PWD/config.yaml:/config/config.yaml" aegis:latest check
+```
+
+Mount your config at `/config/config.yaml`. Aegis also writes its audit log and
+review queue relative to its working directory `/config` — mount a writable volume
+there to persist them:
+
+```bash
+docker run --rm \
+  -v "$PWD/config.yaml:/config/config.yaml" \
+  -v "$PWD/logs:/config/logs" \
+  aegis:latest clean --interactive=false
+```
+
+Two permission notes:
+
+- **Kubernetes (in-cluster)**: works out of the box — Aegis reads the mounted
+  service-account token and uses in-cluster config. Nothing extra needed.
+- **Docker socket**: the container needs the host's Docker socket group to talk to
+  the daemon, since it runs as non-root. Pass the socket's group ID (this is how
+  `docker` CLI containers do it):
+
+  ```bash
+  docker run --rm \
+    --user 65532:65532 \
+    --group-add "$(stat -c %g /var/run/docker.sock)" \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "$PWD/config.yaml:/config/config.yaml" \
+    aegis:latest clean
+  ```
+
+  On macOS (Docker Desktop) the socket is owned by the Docker VM, so grant access
+  with `--privileged` or run the socket mount with the `docker` group instead.
+
+For a read-only review of what would be cleaned, use `aegis list` or
+`aegis clean --dry-run` inside the container.
+
+Build the image locally with:
+
+```bash
+docker build -t aegis:latest .
+```
+
 ### Usage
 
 Aegis has three subcommands designed around a **check → clean → review** workflow:
@@ -126,10 +205,13 @@ to run:
 
 ```bash
 aegis list                       # everything (Docker + Kubernetes)
-aegis list --types containers    # only Docker containers
-aegis list --kinds pods          # only Kubernetes pods
+aegis list --types containers    # only Docker containers (no Kubernetes)
+aegis list --kinds pods          # only Kubernetes pods (no Docker)
 aegis list --types images,volumes --kinds jobs,pvcs
 ```
+
+Passing `--types` shows only the Docker side; passing `--kinds` shows only the
+Kubernetes side. Omit both for everything, or combine them to filter each side.
 
 The Kubernetes tables come from whatever cluster Aegis is pointed at — locally it
 uses your current `kubectl` context (works with AKS, EKS, GKE, minikube, kind, ...),
@@ -186,3 +268,36 @@ aegis clean --config path/to/config.yaml
 aegis check --log-level debug
 aegis --no-banner
 ```
+
+### Make targets
+
+Development and release helpers (run `make help` for a full list):
+
+```bash
+make build            # build bin/aegis
+make install          # build + install onto your PATH
+make test             # tests with race detector + coverage
+make lint             # golangci-lint run ./...
+make fmt              # go fmt ./...
+make mod              # tidy + vendor modules
+
+make run              # go run with config.yaml (CONFIG=... to override)
+make run-dry          # dry-run mode
+make run-debug        # debug logging
+make run-noninteractive  # clean without prompts (denials go to review queue)
+make run-auto         # auto-approve everything (y/N confirmation built in)
+make run-override     # run with an override token (prompts for it)
+
+make docker-build     # docker build -t aegis:<version>
+make docker-run       # run the non-root image with socket + kubeconfig mounts
+make docker-run-dry   # same, but --dry-run
+
+make release          # cross-compile release binaries into bin/release/
+make version          # show current version
+make check            # is bin/aegis built?
+make clean            # remove build artifacts, logs, coverage
+```
+
+The Docker make targets handle the non-root image for you: they pass the
+host Docker socket group, mount `~/.kube/config` into the container's home
+(`/config/.kube/config`), and persist logs to `./logs`.
