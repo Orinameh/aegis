@@ -1,0 +1,80 @@
+# Aegis Configuration
+
+# Enable/disable features
+enable_docker_prune: true
+enable_k8s_prune: true
+
+# Threshold for disk usage (percentage)
+max_disk_usage_percent: 85
+
+# Logging configuration
+log_level: info
+log_encoding: json
+log_file: stdout
+
+# Timeout for cleanup operations
+timeout: 5m
+
+# Docker specific configuration
+docker:
+  prune_stopped_containers: true
+  prune_dangling_images: true
+  prune_build_cache: true
+  prune_networks: false
+  prune_volumes: false
+
+# Kubernetes specific configuration
+kubernetes:
+  delete_failed_pods: true
+  delete_evicted_pods: true
+  delete_completed_jobs: true
+  delete_succeeded_jobs: false
+  delete_orphaned_pvcs: false
+  include_namespaces: []
+  exclude_namespaces:
+    - "kube-system"
+    - "kube-public"
+    - "kube-node-lease"
+  job_retention_days: 7
+
+# Protection guard configuration
+protection:
+  enabled: true
+  strict_mode: false
+  require_approval: true
+  interactive_mode: true
+  audit_log_path: "logs/aegis-audit.log"
+  review_queue_path: "logs/aegis-review.json"
+  
+  # Custom protection rules (in addition to defaults)
+  custom_rules:
+    - id: "protect-production"
+      resource_type: "pod"
+      namespace_patterns: ["^prod-.*", "^production$"]
+      protection_level: "critical"
+      reason: "Production namespaces contain critical workloads"
+      override_allowed: false
+      requires_approval: true
+    
+    - id: "protect-database"
+      resource_type: "pod"
+      name_patterns: [".*-postgres-.*", ".*-mysql-.*", ".*-mongodb-.*"]
+      protection_level: "critical"
+      reason: "Database pods may contain valuable data"
+      override_allowed: false
+      requires_approval: true
+    
+    - id: "protect-stateful"
+      resource_type: "pod"
+      name_patterns: [".*-statefulset-.*"]
+      protection_level: "strict"
+      reason: "StatefulSet pods maintain state"
+      override_allowed: true
+      requires_approval: true
+
+# Webhook notifications for `aegis check`
+notification:
+  enabled: false
+  webhook_url: ""             # e.g. your Slack/Discord/ntfy.sh webhook URL
+  provider: "generic"         # generic, slack, discord, or ntfy
+  timeout: 10s
