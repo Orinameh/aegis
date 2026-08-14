@@ -11,7 +11,6 @@ linters:
     - staticcheck
     - unconvert
     - unused
-
   exclusions:
     generated: lax
     rules:
@@ -20,10 +19,10 @@ linters:
           - errcheck
 
 formatters:
-  default: standard
   enable:
     - gofmt
     - goimports
   settings:
     goimports:
-      local-prefixes: aegis
+      local-prefixes:
+        - aegis
