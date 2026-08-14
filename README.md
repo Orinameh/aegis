@@ -225,6 +225,18 @@ aegis list --types images,volumes --kinds jobs,pvcs
 Passing `--types` shows only the Docker side; passing `--kinds` shows only the
 Kubernetes side. Omit both for everything, or combine them to filter each side.
 
+`--types` accepts Docker resources (`containers`, `images`, `volumes`,
+`networks`); `--kinds` accepts Kubernetes kinds (`pods`, `jobs`, `pvcs`). Cookbook
+examples:
+
+```bash
+aegis list --types images                    # just Docker images
+aegis list --types containers,images         # containers + images only
+aegis list --kinds jobs                      # just Kubernetes jobs
+aegis list --kinds pods,pvcs                 # pods + PVCs only
+aegis list --types images --kinds jobs       # Docker images + K8s jobs
+```
+
 The Kubernetes tables come from whatever cluster Aegis is pointed at — locally it
 uses your current `kubectl` context (works with AKS, EKS, GKE, minikube, kind, ...),
 and inside a cluster it auto-detects the in-cluster config.
@@ -237,6 +249,16 @@ safe to run every 5–15 minutes via a systemd timer or Kubernetes CronJob.
 
 Exit codes: `0` = below threshold (or notifications disabled), `2` = threshold exceeded
 (notification sent), `1` = a real error.
+
+Examples:
+
+```bash
+aegis check                       # notify only when disk crosses the configured threshold
+aegis check --threshold 90        # alert only when disk hits 90% (overrides config)
+aegis check --config prod.yaml    # use a different config's webhook/threshold
+aegis check --log-level debug     # verbose output for troubleshooting
+aegis check --no-banner           # quiet, script-friendly output
+```
 
 ##### Setting the threshold
 
@@ -287,7 +309,50 @@ aegis clean --interactive=false   # unattended: strict denials go to the review 
 aegis clean --dry-run             # preview only
 aegis clean --auto-approve        # bypass prompts (use with caution)
 aegis clean --threshold 90        # only delete once disk is 90% full
+aegis clean --images-only         # only clean unused Docker images
+aegis clean --k8s-only --dry-run  # preview what Kubernetes would be swept
+aegis clean --interactive=false --docker-only --threshold 80   # unattended, Docker only, 80%
 ```
+
+##### Scoping what gets cleaned
+
+By default `aegis clean` cleans every resource that is enabled in `config.yaml`.
+To restrict a run to a single kind of resource, pass a scope flag. This is
+CLI-side only: it does not edit your config, and you may set at most one scope
+flag per run.
+
+```bash
+aegis clean --docker-only             # only the Docker side, honoring its config toggles
+aegis clean --k8s-only                # only the Kubernetes side, honoring its config toggles
+aegis clean --images-only             # only unused Docker images
+aegis clean --containers-only         # only stopped Docker containers
+aegis clean --volumes-only            # only unused Docker volumes
+aegis clean --networks-only           # only unused Docker networks
+aegis clean --build-cache-only        # only the Docker build cache
+aegis clean --pods-only               # only failed/evicted Kubernetes pods
+aegis clean --jobs-only               # only completed Kubernetes jobs
+aegis clean --pvcs-only               # only orphaned Kubernetes PVCs
+```
+
+The granular flags (`--images-only`, `--pvcs-only`, etc.) force that resource on
+even if it is disabled in `config.yaml`. The umbrella flags (`--docker-only`,
+`--k8s-only`) disable the other side but otherwise honor the toggles in your
+config. In all cases the disk-usage threshold still decides whether cleanup runs
+at all.
+
+##### What is (and is not) cleaned on Kubernetes
+
+Aegis deliberately removes only **leaf, stateless** resources that are safe to
+delete once they finish or fail: terminating/failed/evicted **pods**, completed
+or succeeded **jobs**, and orphaned **PersistentVolumeClaims**. These have no
+children and their loss has no cascading effect.
+
+Higher-level controllers — **Deployments, StatefulSets, DaemonSets,
+ReplicaSets, Services, ConfigMaps, Secrets, Ingresses**, and anything else that
+owns or is depended on by other objects — are **not** covered. Deleting them is
+load-bearing: it would destroy running workloads, endpoints, or configuration
+that other resources rely on, and that is not what a clean-up tool should do
+automatically. Use `kubectl` and your control plane intentionally for those.
 
 #### `aegis review` — the pending-review queue
 
@@ -298,6 +363,15 @@ or cleans with an override:
 ```bash
 aegis review          # shows denied items awaiting human judgment
 aegis review --clear  # clear the queue after review
+```
+
+Example workflow:
+
+```bash
+aegis clean --interactive=false      # unattended run; strict-protected resources are queued
+aegis review                         # see what was denied and why
+# ... approve/decide on items ...
+aegis review --clear                 # empty the queue once resolved
 ```
 
 Other flags (persistent on all commands):
