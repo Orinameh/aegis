@@ -1,4 +1,4 @@
-.PHONY: build test clean run run-dry run-built run-dry-built lint fmt mod install docker-build docker-run release help
+.PHONY: build test clean run run-dry run-built run-dry-built lint fmt mod install docker-build docker-run release release-binaries help
 
 BINARY_NAME=aegis
 GO_FILES=$(shell find . -name "*.go" -type f)
@@ -145,7 +145,9 @@ docker-run-dry:
 		-v ${PWD}/logs:/config/logs \
 		${BINARY_NAME}:${VERSION} clean --dry-run $(ARGS)
 
-release: test build
+# Cross-compile release binaries without re-running tests (CI gates tests
+# separately via workflow jobs). For local use, `release` runs tests first.
+release-binaries:
 	@echo "$(BLUE)Building release binaries...$(NC)"
 	mkdir -p bin/release
 	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.version=${VERSION}" -o bin/release/${BINARY_NAME}-linux-amd64 cmd/${BINARY_NAME}/main.go
@@ -154,6 +156,8 @@ release: test build
 	GOOS=windows GOARCH=amd64 go build -ldflags="-X main.version=${VERSION}" -o bin/release/${BINARY_NAME}-windows-amd64.exe cmd/${BINARY_NAME}/main.go
 	@echo "$(GREEN) Release binaries built in bin/release/$(NC)"
 	@ls -la bin/release/
+
+release: test build release-binaries
 
 # Run with specific config file
 config-%:

@@ -12,15 +12,15 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"aegis/internal/banner"
-	"aegis/internal/config"
-	"aegis/internal/docker"
-	"aegis/internal/guard"
-	"aegis/internal/k8s"
-	"aegis/internal/notify"
-	"aegis/internal/system"
-	"aegis/internal/table"
-	"aegis/pkg/logger"
+	"github.com/orinameh/aegis/internal/banner"
+	"github.com/orinameh/aegis/internal/config"
+	"github.com/orinameh/aegis/internal/docker"
+	"github.com/orinameh/aegis/internal/guard"
+	"github.com/orinameh/aegis/internal/k8s"
+	"github.com/orinameh/aegis/internal/notify"
+	"github.com/orinameh/aegis/internal/system"
+	"github.com/orinameh/aegis/internal/table"
+	"github.com/orinameh/aegis/pkg/logger"
 )
 
 var (

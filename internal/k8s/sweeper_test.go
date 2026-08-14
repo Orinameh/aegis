@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"aegis/internal/config"
+	"github.com/orinameh/aegis/internal/config"
 )
 
 func TestShouldDeletePod(t *testing.T) {

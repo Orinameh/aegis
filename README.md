@@ -100,7 +100,7 @@ aegis/
 - **Go 1.26+** — to build from source
 - **Docker** or **Kubernetes** access (optional) — needed only for the corresponding cleanup modules
 
-Aegis works on **macOS (Intel & Apple Silicon)** and **Linux**.
+Aegis works on **Linux**, **macOS (Intel & Apple Silicon)**, and **Windows**.
 
 #### Local and hosted Kubernetes (AKS, EKS, GKE, etc.)
 
@@ -117,7 +117,7 @@ The Kubernetes module works in both environments automatically:
 # Option 1: Install with Go (puts the binary in $(go env GOPATH)/bin)
 go install github.com/orinameh/aegis/cmd/aegis@latest
 
-# Option 2: Build from source and install to your PATH (works on macOS & Linux)
+# Option 2: Build from source (macOS & Linux — uses make; see Windows note below)
 git clone https://github.com/orinameh/aegis.git
 cd aegis
 make install
@@ -125,14 +125,24 @@ make install
 
 `make install` builds the binary and copies it to the first writable directory that's on
 your `PATH`, preferring `$(go env GOPATH)/bin`, then `~/.local/bin`,
-`/opt/homebrew/bin` (Apple Silicon), then `/usr/local/bin`. If none qualify, it prints
-the list of directories you need to add to your `PATH` (or install to manually):
+`/opt/homebrew/bin` (Apple Silicon), then `/usr/local/bin` (Windows users build
+manually — see the note above; `make` is a Unix/Makefile tool).
 
 ```bash
 # Manual install if you prefer
 make build
 cp bin/aegis /usr/local/bin/
 ```
+
+**Windows** users can't use `make`; build and install directly:
+
+```powershell
+go build -ldflags="-X main.version=0.1.0" -o aegis.exe ./cmd/aegis
+move aegis.exe $env:LOCALAPPDATA\bin\aegis.exe   # any dir already on your PATH
+```
+
+Prebuilt binaries for `linux-amd64`, `darwin-amd64`, `darwin-arm64`, and
+`windows-amd64` are attached to each [GitHub release](/releases).
 
 ### Running with Docker
 
@@ -322,7 +332,8 @@ make docker-build     # docker build -t aegis:<version>
 make docker-run       # run the non-root image with socket + kubeconfig mounts
 make docker-run-dry   # same, but --dry-run
 
-make release          # cross-compile release binaries into bin/release/
+make release          # run tests + cross-compile release binaries into bin/release/
+make release-binaries # cross-compile only (linux, darwin, windows), without re-running tests
 make version          # show current version
 make check            # is bin/aegis built?
 make clean            # remove build artifacts, logs, coverage
