@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+bin/
+*.exe
+
+# Go workspace & test output
+go.work
+*.out
+*.test
+
+# Vendor directory — not used in the image; keeps the build context small
+vendor/
+
+# Logs & local state
+logs/
+*.log
+
+# Local config with potential secrets
+config.local.yaml
+
+# Docs & CI (unneeded in the image)
+.github/
+docs/
+*.md
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*~
+*.swp

@@ -1,23 +1,33 @@
+# ---- Build stage ----
 FROM golang:1.26-alpine AS builder
 
-WORKDIR /app
+WORKDIR /src
 
-# Copy go mod files
+# Cache module downloads in their own layer (invalidated only when go.mod/sum change)
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
+# Copy source and build a static, stripped binary
 COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-w -s" -o /out/aegis ./cmd/aegis
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /aegis cmd/aegis/main.go
+# ---- Runtime stage ----
+# Minimal, non-root static image: no shell, no package manager, ~1.8 MB base.
+FROM gcr.io/distroless/static-debian12:nonroot
 
-# Final stage
-FROM alpine:latest
+# Metadata
+LABEL org.opencontainers.image.title="aegis" \
+      org.opencontainers.image.description="Protected infrastructure cleaning utility" \
+      org.opencontainers.image.source="https://github.com/Orinameh/aegis"
 
-RUN apk --no-cache add ca-certificates
+# Non-root runtime user (uid/gid 65532) so the container can't write outside
+# its mounted paths.
+USER nonroot:nonroot
 
-COPY --from=builder /aegis /usr/local/bin/aegis
+COPY --from=builder --chown=nonroot:nonroot /out/aegis /usr/local/bin/aegis
+
+WORKDIR /config
+ENV HOME=/config
 
 ENTRYPOINT ["/usr/local/bin/aegis"]
-CMD ["--config", "/config.yaml"]
+CMD ["--config", "/config/config.yaml"]

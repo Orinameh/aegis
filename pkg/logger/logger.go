@@ -2,8 +2,6 @@ package logger
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -68,15 +66,6 @@ func New(cfg *Config) (*zap.Logger, error) {
 	return logger, nil
 }
 
-// MustNew creates a new logger or panics
-func MustNew(cfg *Config) *zap.Logger {
-	logger, err := New(cfg)
-	if err != nil {
-		panic(fmt.Sprintf("failed to create logger: %v", err))
-	}
-	return logger
-}
-
 // DefaultConfig returns a default logger configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -85,19 +74,4 @@ func DefaultConfig() *Config {
 		OutputPath:  "stdout",
 		Development: false,
 	}
-}
-
-// SetupLogFile creates a log file for audit logs
-func SetupLogFile(logDir string) (string, error) {
-	if logDir == "" {
-		logDir = "logs"
-	}
-
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create log directory: %w", err)
-	}
-
-	logPath := filepath.Join(logDir, "aegis-audit.log")
-
-	return logPath, nil
 }

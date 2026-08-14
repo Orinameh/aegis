@@ -46,7 +46,6 @@ run-dry:
 run-built: build
 	@echo "$(BLUE)Running built $(BINARY_NAME) with config: $(CONFIG)$(NC)"
 	./bin/${BINARY_NAME} --config $(CONFIG) $(ARGS)
-
 # Run with built binary in dry-run mode
 run-dry-built: build
 	@echo "$(BLUE)Running built $(BINARY_NAME) in DRY-RUN mode with config: $(CONFIG)$(NC)"
@@ -119,23 +118,32 @@ docker-build:
 	docker build -t ${BINARY_NAME}:${VERSION} -f Dockerfile .
 	@echo "$(GREEN) Docker build complete!$(NC)"
 
+# Runtime helper for the non-root Docker image: mounts the kubeconfig and
+# config file into the container's HOME (/config), persists logs, and passes
+# the host Docker socket group through so the non-root user can reach it.
+DOCKER_SOCK_GID=$(shell stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)
+
 docker-run:
 	@echo "$(BLUE)Running $(BINARY_NAME) in Docker...$(NC)"
 	docker run --rm \
+		--user 65532:65532 \
+		--group-add ${DOCKER_SOCK_GID} \
 		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v ${HOME}/.kube/config:/root/.kube/config \
-		-v ${PWD}/config.yaml:/config.yaml \
-		-v ${PWD}/logs:/logs \
-		${BINARY_NAME}:${VERSION} --config /config.yaml $(ARGS)
+		-v ${HOME}/.kube/config:/config/.kube/config \
+		-v ${PWD}/config.yaml:/config/config.yaml \
+		-v ${PWD}/logs:/config/logs \
+		${BINARY_NAME}:${VERSION} clean $(ARGS)
 
 docker-run-dry:
 	@echo "$(BLUE)Running $(BINARY_NAME) in Docker (DRY-RUN mode)...$(NC)"
 	docker run --rm \
+		--user 65532:65532 \
+		--group-add ${DOCKER_SOCK_GID} \
 		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v ${HOME}/.kube/config:/root/.kube/config \
-		-v ${PWD}/config.yaml:/config.yaml \
-		-v ${PWD}/logs:/logs \
-		${BINARY_NAME}:${VERSION} --config /config.yaml --dry-run $(ARGS)
+		-v ${HOME}/.kube/config:/config/.kube/config \
+		-v ${PWD}/config.yaml:/config/config.yaml \
+		-v ${PWD}/logs:/config/logs \
+		${BINARY_NAME}:${VERSION} clean --dry-run $(ARGS)
 
 release: test build
 	@echo "$(BLUE)Building release binaries...$(NC)"

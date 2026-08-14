@@ -273,7 +273,6 @@ func runCheck(cmd *cobra.Command) (bool, error) {
 
 	log.Info("notification sent",
 		zap.String("provider", cfg.Notification.Provider),
-		zap.String("webhook", cfg.Notification.WebhookURL),
 	)
 	return true, nil
 }
@@ -433,10 +432,20 @@ func runList(cmd *cobra.Command) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 	defer cancel()
 
+	if err := validateListFilters(); err != nil {
+		return err
+	}
+
 	wantDocker := func(t string) bool { return contains(listDockerTypes, t) || len(listDockerTypes) == 0 }
 	wantK8s := func(t string) bool { return contains(listK8sKinds, t) || len(listK8sKinds) == 0 }
 
-	if cfg.EnableDockerPrune && (len(listDockerTypes) == 0 || anyRequested(listDockerTypes, "containers", "images", "volumes", "networks")) {
+	// Filter scoping: --types requests Docker resources, --kinds requests
+	// Kubernetes resources. When only one side is requested, render only
+	// that side; when neither is given, show everything.
+	onlyDocker := len(listDockerTypes) > 0 && len(listK8sKinds) == 0
+	onlyK8s := len(listK8sKinds) > 0 && len(listDockerTypes) == 0
+
+	if cfg.EnableDockerPrune && !onlyK8s && (len(listDockerTypes) == 0 || anyRequested(listDockerTypes, "containers", "images", "volumes", "networks")) {
 		pruner, err := docker.NewPruner(log, nil)
 		if err != nil {
 			log.Error("failed to create Docker pruner", zap.Error(err))
@@ -451,7 +460,7 @@ func runList(cmd *cobra.Command) error {
 		renderDockerTables(wantDocker, inv)
 	}
 
-	if cfg.EnableK8sPrune && (len(listK8sKinds) == 0 || anyRequested(listK8sKinds, "pods", "jobs", "pvcs")) {
+	if cfg.EnableK8sPrune && !onlyDocker && (len(listK8sKinds) == 0 || anyRequested(listK8sKinds, "pods", "jobs", "pvcs")) {
 		sweeper, err := k8s.NewSweeper(log, nil)
 		if err != nil {
 			log.Error("failed to create Kubernetes sweeper", zap.Error(err))
@@ -565,6 +574,25 @@ func renderK8sTables(want func(string) bool, inv *k8s.Inventory) {
 func printTable(title string, t *table.Table) {
 	fmt.Printf("\n%s\n", title)
 	t.Render(os.Stdout)
+}
+
+// validateListFilters errors when an unknown value is passed to --types or
+// --kinds, so a typo doesn't silently produce empty output.
+func validateListFilters() error {
+	knownDockerTypes := []string{"containers", "images", "volumes", "networks"}
+	knownK8sKinds := []string{"pods", "jobs", "pvcs"}
+
+	for _, t := range listDockerTypes {
+		if !contains(knownDockerTypes, t) {
+			return fmt.Errorf("unknown Docker resource type %q (valid: %v)", t, knownDockerTypes)
+		}
+	}
+	for _, k := range listK8sKinds {
+		if !contains(knownK8sKinds, k) {
+			return fmt.Errorf("unknown Kubernetes resource kind %q (valid: %v)", k, knownK8sKinds)
+		}
+	}
+	return nil
 }
 
 func contains(list []string, v string) bool {

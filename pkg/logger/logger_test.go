@@ -98,39 +98,3 @@ func TestNewInvalidEncodingFails(t *testing.T) {
 		t.Fatal("expected error for unknown encoding, got nil")
 	}
 }
-
-func TestMustNewPanicsOnInvalidConfig(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("expected MustNew to panic on invalid encoding")
-		}
-	}()
-
-	MustNew(&Config{
-		Level:      "info",
-		Encoding:   "not-an-encoding",
-		OutputPath: "stdout",
-	})
-}
-
-func TestSetupLogFileCreatesDirectory(t *testing.T) {
-	root := t.TempDir()
-	logDir := filepath.Join(root, "nested", "logs")
-
-	path, err := SetupLogFile(logDir)
-	if err != nil {
-		t.Fatalf("SetupLogFile returned error: %v", err)
-	}
-
-	if path != filepath.Join(logDir, "aegis-audit.log") {
-		t.Errorf("unexpected path: %q", path)
-	}
-
-	info, err := os.Stat(logDir)
-	if err != nil {
-		t.Fatalf("expected log dir to be created: %v", err)
-	}
-	if !info.IsDir() {
-		t.Error("expected log dir to be a directory")
-	}
-}
