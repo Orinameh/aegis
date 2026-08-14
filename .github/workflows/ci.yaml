@@ -57,3 +57,7 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11
+          # Skip schema download: `config verify` fetches the JSON schema
+          # from golangci-lint.run, which can time out in CI and block the
+          # lint run on a transient network issue.
+          verify: false
