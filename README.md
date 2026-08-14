@@ -136,9 +136,17 @@ cp bin/aegis /usr/local/bin/
 
 ### Running with Docker
 
-A prebuilt image is available and runs as a **non-root** user. The image is
-distroless (no shell, no package manager) and the runtime user is UID/GID `65532`
-(distroless's standard `nonroot` user), so the container has no privileges of its own.
+Build the image (there is no published registry image yet, so build it first):
+
+```bash
+docker build -t aegis:latest .
+# or
+make docker-build   # tags it aegis:<version>
+```
+
+The image runs as a **non-root** user. It's distroless (no shell, no package
+manager) with the runtime user UID/GID `65532` (distroless's standard `nonroot`
+user), so the container has no privileges of its own.
 
 ```bash
 docker run --rm -v "$PWD/config.yaml:/config/config.yaml" aegis:latest check
@@ -177,12 +185,6 @@ Two permission notes:
 
 For a read-only review of what would be cleaned, use `aegis list` or
 `aegis clean --dry-run` inside the container.
-
-Build the image locally with:
-
-```bash
-docker build -t aegis:latest .
-```
 
 ### Usage
 
