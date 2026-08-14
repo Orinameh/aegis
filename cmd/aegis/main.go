@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -18,6 +19,7 @@ import (
 	"aegis/internal/k8s"
 	"aegis/internal/notify"
 	"aegis/internal/system"
+	"aegis/internal/table"
 	"aegis/pkg/logger"
 )
 
@@ -110,10 +112,28 @@ non-interactive runs and queued for human review.
 	},
 }
 
-var reviewClear bool
+var listCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all Docker and Kubernetes resources in a table",
+	Long: `Show a read-only inventory of all Docker and Kubernetes resources
+in aligned tables. Performs no mutations, so it is safe to run at any time.
+
+  aegis list                       list everything
+  aegis list --types containers    list only Docker containers
+  aegis list --kinds pods          list only Kubernetes pods`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runList(cmd)
+	},
+}
+
+var (
+	reviewClear      bool
+	listDockerTypes  []string
+	listK8sKinds     []string
+)
 
 func init() {
-	rootCmd.AddCommand(checkCmd, cleanCmd, reviewCmd)
+	rootCmd.AddCommand(checkCmd, cleanCmd, reviewCmd, listCmd)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "config.yaml", "config file path")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "log level (debug, info, warn, error)")
@@ -124,6 +144,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&noBanner, "no-banner", false, "suppress banner display")
 	rootCmd.PersistentFlags().StringVar(&bannerStyle, "banner-style", "simple", "banner style (simple, minimal, color, none)")
 	reviewCmd.Flags().BoolVar(&reviewClear, "clear", false, "empty the review queue")
+	listCmd.Flags().StringSliceVar(&listDockerTypes, "types", nil, "Docker resource types to list (containers, images, volumes, networks)")
+	listCmd.Flags().StringSliceVar(&listK8sKinds, "kinds", nil, "Kubernetes resource kinds to list (pods, jobs, pvcs)")
 }
 
 func main() {
@@ -397,6 +419,213 @@ func runReview(cmd *cobra.Command, clear bool) error {
 			e.Type, e.Resource, e.Rule, e.Reason)
 	}
 	return nil
+}
+
+// runList is the read-only inventory path (`aegis list`). It renders Docker
+// and Kubernetes resources as aligned tables and never mutates anything.
+func runList(cmd *cobra.Command) error {
+	cfg, log, syncLog, err := loadConfigAndLogger(cmd)
+	if err != nil {
+		return err
+	}
+	defer syncLog()
+
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+	defer cancel()
+
+	wantDocker := func(t string) bool { return contains(listDockerTypes, t) || len(listDockerTypes) == 0 }
+	wantK8s := func(t string) bool { return contains(listK8sKinds, t) || len(listK8sKinds) == 0 }
+
+	if cfg.EnableDockerPrune && (len(listDockerTypes) == 0 || anyRequested(listDockerTypes, "containers", "images", "volumes", "networks")) {
+		pruner, err := docker.NewPruner(log, nil)
+		if err != nil {
+			log.Error("failed to create Docker pruner", zap.Error(err))
+			return err
+		}
+		defer pruner.Close()
+
+		inv, err := pruner.List(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list Docker resources: %w", err)
+		}
+		renderDockerTables(wantDocker, inv)
+	}
+
+	if cfg.EnableK8sPrune && (len(listK8sKinds) == 0 || anyRequested(listK8sKinds, "pods", "jobs", "pvcs")) {
+		sweeper, err := k8s.NewSweeper(log, nil)
+		if err != nil {
+			log.Error("failed to create Kubernetes sweeper", zap.Error(err))
+			return err
+		}
+		defer sweeper.Close()
+
+		inv, err := sweeper.List(ctx, &cfg.Kubernetes)
+		if err != nil {
+			return fmt.Errorf("failed to list Kubernetes resources: %w", err)
+		}
+		renderK8sTables(wantK8s, inv)
+	}
+
+	return nil
+}
+
+func renderDockerTables(want func(string) bool, inv *docker.Inventory) {
+	if want("containers") {
+		t := table.New("CONTAINER", "ID", "IMAGE", "STATUS", "CREATED", "SIZE")
+		for _, c := range inv.Containers {
+			t.AddRow(
+				c.Name,
+				shortID(c.ID),
+				c.Image,
+				c.Status,
+				humanTime(c.Created),
+				humanBytes(uint64(maxInt64(c.Size, 0))),
+			)
+		}
+		printTable("Docker Containers", t)
+	}
+
+	if want("images") {
+		t := table.New("IMAGE", "ID", "SIZE", "CONTAINERS", "CREATED")
+		for _, img := range inv.Images {
+			name := "<none>"
+			if len(img.RepoTags) > 0 && img.RepoTags[0] != "<none>:<none>" {
+				name = img.RepoTags[0]
+			}
+			t.AddRow(
+				name,
+				shortID(img.ID),
+				humanBytes(uint64(maxInt64(img.Size, 0))),
+				fmt.Sprintf("%d", img.Containers),
+				humanTime(img.Created),
+			)
+		}
+		printTable("Docker Images", t)
+	}
+
+	if want("volumes") {
+		t := table.New("VOLUME", "DRIVER", "SCOPE", "SIZE", "REF COUNT")
+		for _, v := range inv.Volumes {
+			size := humanBytes(uint64(maxInt64(v.Size, 0)))
+			if v.Size < 0 {
+				size = "n/a"
+			}
+			t.AddRow(v.Name, v.Driver, v.Scope, size, fmt.Sprintf("%d", v.RefCount))
+		}
+		printTable("Docker Volumes", t)
+	}
+
+	if want("networks") {
+		t := table.New("NETWORK", "DRIVER", "SCOPE", "INTERNAL")
+		for _, n := range inv.Networks {
+			t.AddRow(n.Name, n.Driver, n.Scope, boolYesNo(n.Internal))
+		}
+		printTable("Docker Networks", t)
+	}
+}
+
+func renderK8sTables(want func(string) bool, inv *k8s.Inventory) {
+	if want("pods") {
+		t := table.New("POD", "NAMESPACE", "PHASE", "CREATED")
+		for _, p := range inv.Pods {
+			t.AddRow(p.Name, p.Namespace, p.Phase, humanTime(p.Created.Unix()))
+		}
+		printTable("Kubernetes Pods", t)
+	}
+
+	if want("jobs") {
+		t := table.New("JOB", "NAMESPACE", "SUCCEEDED", "FAILED", "CREATED", "FINISHED")
+		for _, j := range inv.Jobs {
+			finished := ""
+			if !j.Finished.IsZero() {
+				finished = humanTime(j.Finished.Unix())
+			}
+			t.AddRow(
+				j.Name,
+				j.Namespace,
+				fmt.Sprintf("%d", j.Succeeded),
+				fmt.Sprintf("%d", j.Failed),
+				humanTime(j.Created.Unix()),
+				finished,
+			)
+		}
+		printTable("Kubernetes Jobs", t)
+	}
+
+	if want("pvcs") {
+		t := table.New("PVC", "NAMESPACE", "PHASE")
+		for _, p := range inv.PVCs {
+			t.AddRow(p.Name, p.Namespace, p.Phase)
+		}
+		printTable("Kubernetes PVCs", t)
+	}
+}
+
+// printTable writes a section title and its table to stdout.
+func printTable(title string, t *table.Table) {
+	fmt.Printf("\n%s\n", title)
+	t.Render(os.Stdout)
+}
+
+func contains(list []string, v string) bool {
+	for _, item := range list {
+		if item == v {
+			return true
+		}
+	}
+	return false
+}
+
+// anyRequested reports whether at least one of the given known values was
+// explicitly requested via the filters. Always true when nothing is
+// requested (which means "everything").
+func anyRequested(selected []string, known ...string) bool {
+	for _, v := range selected {
+		for _, k := range known {
+			if v == k {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+func humanTime(secs int64) string {
+	return time.Unix(secs, 0).Format("2006-01-02 15:04")
+}
+
+func humanBytes(bytes uint64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := uint64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+func boolYesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func executeCleanup(ctx context.Context, cfg *config.Config, log *zap.Logger, g *guard.Guard) error {

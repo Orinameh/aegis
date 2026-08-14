@@ -1,3 +1,17 @@
+```
+   ╔═══════════════════════════════════════════╗
+   ║                                         ║
+   ║    █████╗ ███████╗ ██████╗ ██╗███████╗  ║
+   ║   ██╔══██╗██╔════╝██╔════╝ ██║██╔════╝  ║
+   ║   ███████║█████╗  ██║  ███╗██║███████╗  ║
+   ║   ██╔══██║██╔══╝  ██║   ██║██║╚════██║  ║
+   ║   ██║  ██║███████╗╚██████╔╝██║███████║  ║
+   ║   ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝╚══════╝  ║
+   ║                                         ║
+   ║   Protected Infrastructure Cleaning     ║
+   ╚═══════════════════════════════════════════╝
+```
+
 # 🛡️ Aegis
 
 **Protected Infrastructure Cleaning Utility**
@@ -15,6 +29,33 @@ Aegis is a unified cloud-native cleanup utility that safely prunes Docker and Ku
 - **Configurable**: YAML-based configuration with environment variable overrides
 - **Structured Logging**: JSON logs with configurable levels
 
+## 🗺️ How It Works
+
+```text
+┌────────────┐     ┌───────────────────────────┐
+│   Aegis    │────▶│   Docker Daemon (local)   │
+│  (CLI)     │     │  containers · images      │
+│            │     │  volumes · networks       │
+└────────────┘     └───────────────────────────┘
+   │      │
+   │      └────────▶┌───────────────────────────┐
+   │                │   Kubernetes Cluster      │
+   │                │  pods · jobs · pvcs       │
+   │                │  (local minikube/kind OR  │
+   │                │   hosted AKS/EKS/GKE)     │
+   │                └───────────────────────────┘
+   ▼
+┌───────────────────────────┐
+│   Protection Guard        │
+│  ⚠️ warning   🚫 strict   │
+│  🔴 critical  ✅ approved │
+└───────────────────────────┘
+   │
+   ├─▶ dry-run ──▶ report only
+   ├─▶ interactive ──▶ Y/N confirmation per resource
+   └─▶ auto-approve ──▶ delete (use with caution)
+```
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -23,6 +64,15 @@ Aegis is a unified cloud-native cleanup utility that safely prunes Docker and Ku
 - **Docker** or **Kubernetes** access (optional) — needed only for the corresponding cleanup modules
 
 Aegis works on **macOS (Intel & Apple Silicon)** and **Linux**.
+
+#### Local and hosted Kubernetes (AKS, EKS, GKE, etc.)
+
+The Kubernetes module works in both environments automatically:
+
+- **Local**: uses your `~/.kube/config` (whichever cluster your current `kubectl`
+  context points to — including managed services like AKS, EKS, or GKE).
+- **In-cluster**: when run as a pod inside a cluster, it auto-detects the in-cluster
+  config, so it works on any hosted/managed Kubernetes service.
 
 ### Installation
 
@@ -55,9 +105,27 @@ Aegis has three subcommands designed around a **check → clean → review** wor
 aegis                 # alias for `aegis clean` (backward compatible)
 aegis clean           # run destructive cleanup with protection guards
 aegis check           # read-only disk check; notifies via webhook when over threshold
+aegis list            # read-only inventory of all Docker & Kubernetes resources
 aegis review          # list actions denied by protection that await review
 aegis review --clear  # empty the review queue
 ```
+
+#### `aegis list` — read-only resource inventory
+
+Shows all Docker containers, images, volumes, and networks, plus all Kubernetes pods,
+jobs, and PVCs, rendered as aligned tables. Performs **no mutations**, so it's always safe
+to run:
+
+```bash
+aegis list                       # everything (Docker + Kubernetes)
+aegis list --types containers    # only Docker containers
+aegis list --kinds pods          # only Kubernetes pods
+aegis list --types images,volumes --kinds jobs,pvcs
+```
+
+The Kubernetes tables come from whatever cluster Aegis is pointed at — locally it
+uses your current `kubectl` context (works with AKS, EKS, GKE, minikube, kind, ...),
+and inside a cluster it auto-detects the in-cluster config.
 
 #### `aegis check` — safe to run unattended
 
