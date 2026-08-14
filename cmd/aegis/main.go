@@ -127,9 +127,9 @@ in aligned tables. Performs no mutations, so it is safe to run at any time.
 }
 
 var (
-	reviewClear      bool
-	listDockerTypes  []string
-	listK8sKinds     []string
+	reviewClear     bool
+	listDockerTypes []string
+	listK8sKinds    []string
 )
 
 func init() {
@@ -442,7 +442,7 @@ func runList(cmd *cobra.Command) error {
 			log.Error("failed to create Docker pruner", zap.Error(err))
 			return err
 		}
-		defer pruner.Close()
+		defer func() { _ = pruner.Close() }()
 
 		inv, err := pruner.List(ctx)
 		if err != nil {
@@ -457,7 +457,7 @@ func runList(cmd *cobra.Command) error {
 			log.Error("failed to create Kubernetes sweeper", zap.Error(err))
 			return err
 		}
-		defer sweeper.Close()
+		defer func() { _ = sweeper.Close() }()
 
 		inv, err := sweeper.List(ctx, &cfg.Kubernetes)
 		if err != nil {

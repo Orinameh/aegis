@@ -37,11 +37,11 @@ type VolumeSummary struct {
 
 // NetworkSummary is a read-only snapshot of a Docker network.
 type NetworkSummary struct {
-	Name      string
-	ID        string
-	Driver    string
-	Scope     string
-	Internal  bool
+	Name       string
+	ID         string
+	Driver     string
+	Scope      string
+	Internal   bool
 	Attachable bool
 }
 

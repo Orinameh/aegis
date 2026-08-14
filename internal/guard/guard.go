@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,7 +14,6 @@ import (
 type Guard struct {
 	rules         *RuleSet
 	logger        *zap.Logger
-	mu            sync.RWMutex
 	auditLogger   *AuditLogger
 	reviewQueue   *ReviewQueue
 	dryRun        bool

@@ -41,20 +41,24 @@ func (t *Table) Render(w io.Writer) {
 		}
 	}
 
+	var out strings.Builder
+
 	writeRow := func(cells []string) {
-		var sb strings.Builder
+		last := len(t.headers) - 1
 		for i := range t.headers {
 			cell := ""
 			if i < len(cells) {
 				cell = cells[i]
 			}
 			if i > 0 {
-				sb.WriteString("  ")
+				out.WriteString("  ")
 			}
-			sb.WriteString(cell)
-			sb.WriteString(strings.Repeat(" ", widths[i]-len(cell)))
+			out.WriteString(cell)
+			if i < last {
+				out.WriteString(strings.Repeat(" ", widths[i]-len(cell)))
+			}
 		}
-		io.WriteString(w, strings.TrimRight(sb.String(), " ")+"\n")
+		out.WriteString("\n")
 	}
 
 	writeRow(t.headers)
@@ -63,9 +67,11 @@ func (t *Table) Render(w io.Writer) {
 	for i, wd := range widths {
 		sep[i] = strings.Repeat("-", wd)
 	}
-	io.WriteString(w, strings.Join(sep, "  ")+"\n")
+	out.WriteString(strings.Join(sep, "  ") + "\n")
 
 	for _, row := range t.rows {
 		writeRow(row)
 	}
+
+	_, _ = io.WriteString(w, out.String())
 }
