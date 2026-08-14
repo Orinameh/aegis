@@ -9,8 +9,8 @@ import (
 	"github.com/moby/moby/client"
 	"go.uber.org/zap"
 
-	"aegis/internal/config"
-	"aegis/internal/guard"
+	"github.com/orinameh/aegis/internal/config"
+	"github.com/orinameh/aegis/internal/guard"
 )
 
 // Pruner handles Docker cleanup operations

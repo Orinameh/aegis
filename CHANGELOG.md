@@ -34,6 +34,9 @@ Initial release — a protected cleanup CLI for Docker and Kubernetes.
   - Volumes with missing usage data are skipped instead of panicking.
 - Config load treats a missing `--config` file as fatal only when explicitly provided; otherwise falls back to defaults.
 - Logging and linting hardened (errcheck, unused variable removal, consistent formatting).
+- Full **Windows** support: disk usage reporting now has a Windows implementation, and release
+  binaries include `windows-amd64` (a platform-specific `statfs` was replaced with
+  `GetDiskFreeSpaceEx` under a build tag).
 
 ### Security
 - Docker image runs as non-root (`65532`) using a distroless base with no shell.

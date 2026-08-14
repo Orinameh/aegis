@@ -7,7 +7,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"aegis/internal/config"
+	"github.com/orinameh/aegis/internal/config"
 )
 
 // PodSummary is a read-only snapshot of a Kubernetes pod.

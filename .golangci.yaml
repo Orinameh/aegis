@@ -25,4 +25,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - aegis
+        - github.com/orinameh/aegis

@@ -16,8 +16,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 
-	"aegis/internal/config"
-	"aegis/internal/guard"
+	"github.com/orinameh/aegis/internal/config"
+	"github.com/orinameh/aegis/internal/guard"
 )
 
 // Sweeper handles Kubernetes cleanup operations
