@@ -24,15 +24,16 @@ import (
 )
 
 var (
-	cfgFile     string
-	logLevel    string
-	dryRun      bool
-	interactive bool
-	autoApprove bool
-	override    string
-	noBanner    bool
-	bannerStyle string
-	version     = "1.0.0"
+	cfgFile           string
+	logLevel          string
+	dryRun            bool
+	interactive       bool
+	autoApprove       bool
+	override          string
+	noBanner          bool
+	bannerStyle       string
+	thresholdOverride int
+	version           = "0.1.0"
 )
 
 // rootCmd represents the base command. For backward compatibility, bare
@@ -143,6 +144,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&override, "override", "", "override token for bypassing protection")
 	rootCmd.PersistentFlags().BoolVar(&noBanner, "no-banner", false, "suppress banner display")
 	rootCmd.PersistentFlags().StringVar(&bannerStyle, "banner-style", "simple", "banner style (simple, minimal, color, none)")
+	rootCmd.PersistentFlags().IntVar(&thresholdOverride, "threshold", 85, "disk usage threshold percent to run cleanup (1-100)")
 	reviewCmd.Flags().BoolVar(&reviewClear, "clear", false, "empty the review queue")
 	listCmd.Flags().StringSliceVar(&listDockerTypes, "types", nil, "Docker resource types to list (containers, images, volumes, networks)")
 	listCmd.Flags().StringSliceVar(&listK8sKinds, "kinds", nil, "Kubernetes resource kinds to list (pods, jobs, pvcs)")
@@ -184,6 +186,16 @@ func loadConfigAndLogger(cmd *cobra.Command) (*config.Config, *zap.Logger, func(
 	// Override log level from flag when explicitly set
 	if cmd.Flags().Changed("log-level") {
 		cfg.LogLevel = logLevel
+	}
+
+	// Override disk usage threshold from flag when explicitly set. Because
+	// this only runs when --threshold was passed, the flag's default value
+	// is never applied here — the config value stays authoritative.
+	if cmd.Flags().Changed("threshold") {
+		cfg.MaxDiskUsage = thresholdOverride
+		if err := cfg.Validate(); err != nil {
+			return nil, nil, nil, fmt.Errorf("invalid --threshold: %w", err)
+		}
 	}
 
 	logCfg := logger.DefaultConfig()

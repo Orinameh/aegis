@@ -228,6 +228,32 @@ safe to run every 5–15 minutes via a systemd timer or Kubernetes CronJob.
 Exit codes: `0` = below threshold (or notifications disabled), `2` = threshold exceeded
 (notification sent), `1` = a real error.
 
+##### Setting the threshold
+
+The disk usage threshold (percent) controls both `aegis check` and `aegis clean`. Default
+is `85` (`max_disk_usage_percent` in `config.yaml`, valid range 1–100):
+
+```yaml
+# config.yaml
+max_disk_usage_percent: 90   # only alert / clean once disk is 90% full
+```
+
+Override it per-run without editing the config via the `--threshold` flag (same range):
+
+```bash
+aegis check --threshold 90    # alert only when disk hits 90%
+aegis clean --threshold 90    # only start deleting once disk hits 90%
+```
+
+`clean` **skips all deletions while disk usage is below the threshold** — the threshold is
+the gate that decides *when* cleanup is worth running. Setting it higher (e.g. `95`)
+postpones cleanup until the disk is more full; setting it lower (e.g. `70`) makes Aegis
+reclaim space more eagerly. Combine with `--dry-run` to preview:
+
+```bash
+aegis clean --threshold 80 --dry-run   # preview what would be deleted at 80%
+```
+
 ```yaml
 # config.yaml
 notification:
@@ -250,6 +276,7 @@ aegis clean                       # interactive, prompts for protected resources
 aegis clean --interactive=false   # unattended: strict denials go to the review queue
 aegis clean --dry-run             # preview only
 aegis clean --auto-approve        # bypass prompts (use with caution)
+aegis clean --threshold 90        # only delete once disk is 90% full
 ```
 
 #### `aegis review` — the pending-review queue
@@ -268,6 +295,7 @@ Other flags (persistent on all commands):
 ```bash
 aegis clean --config path/to/config.yaml
 aegis check --log-level debug
+aegis clean --threshold 90
 aegis --no-banner
 ```
 
