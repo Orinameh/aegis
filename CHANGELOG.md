@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-08-14
+
+### Added
+- Scoped cleanup for `aegis clean` via `--docker-only`, `--k8s-only`, and per-resource flags (`--images-only`, `--containers-only`, `--volumes-only`, `--networks-only`, `--build-cache-only`, `--pods-only`, `--jobs-only`, `--pvcs-only`). At most one scope flag per run; without one, everything enabled in config is cleaned.
+- README cookbook examples for `list --types/--kinds`, `check`, `clean`, and `review`.
+
+### Changed
+- Disabled the auto-generated Cobra completion command.
+- Clarified docs on what Kubernetes resources are (and are not) cleaned.
+
 ## [0.1.0] - 2026-08-14
 
 Initial release — a protected cleanup CLI for Docker and Kubernetes.

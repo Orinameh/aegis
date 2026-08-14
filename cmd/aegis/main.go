@@ -34,7 +34,7 @@ var (
 	noBanner          bool
 	bannerStyle       string
 	thresholdOverride int
-	version           = "0.1.0"
+	version           = "0.1.1"
 )
 
 // rootCmd represents the base command. For backward compatibility, bare
