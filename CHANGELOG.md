@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-17,
+
 ### Fixed
 - ntfy notifications now POST a plain-text message to the configured topic URL. The previous JSON payload only worked when posted to the ntfy root URL with a `topic` field, so the documented `ntfy.sh/<topic>` webhook setup failed.
 - Nested environment overrides such as `AEGIS_DOCKER_PRUNE_VOLUMES` and `AEGIS_KUBERNETES_JOB_RETENTION_DAYS` are now applied; previously only top-level keys could be overridden.
