@@ -94,6 +94,31 @@ notification:
 	}
 }
 
+func TestLoadEnvOverrides(t *testing.T) {
+	t.Setenv("AEGIS_LOG_LEVEL", "debug")
+	t.Setenv("AEGIS_MAX_DISK_USAGE_PERCENT", "70")
+	t.Setenv("AEGIS_DOCKER_PRUNE_VOLUMES", "true")
+	t.Setenv("AEGIS_KUBERNETES_JOB_RETENTION_DAYS", "42")
+
+	cfg, err := Load("", false)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.LogLevel != "debug" {
+		t.Errorf("expected top-level env override to apply, got log level %q", cfg.LogLevel)
+	}
+	if cfg.MaxDiskUsage != 70 {
+		t.Errorf("expected env threshold 70, got %d", cfg.MaxDiskUsage)
+	}
+	if !cfg.Docker.PruneVolumes {
+		t.Error("expected AEGIS_DOCKER_PRUNE_VOLUMES to set docker.prune_volumes")
+	}
+	if cfg.Kubernetes.JobRetentionDays != 42 {
+		t.Errorf("expected env job retention 42, got %d", cfg.Kubernetes.JobRetentionDays)
+	}
+}
+
 func TestLoadInvalidYAMLFails(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("not: [valid yaml"), 0644); err != nil {
@@ -131,6 +156,19 @@ func TestValidateTimeout(t *testing.T) {
 	cfg := &Config{MaxDiskUsage: 50, Timeout: 0}
 	if err := cfg.Validate(); err == nil {
 		t.Error("expected error for zero timeout")
+	}
+}
+
+func TestValidateJobRetentionDays(t *testing.T) {
+	cfg := &Config{MaxDiskUsage: 50, Timeout: time.Minute, Kubernetes: K8sConfig{JobRetentionDays: -1}}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for negative job retention days")
+	}
+
+	// Zero is allowed: it means "delete finished jobs as soon as they finish".
+	cfg = &Config{MaxDiskUsage: 50, Timeout: time.Minute, Kubernetes: K8sConfig{JobRetentionDays: 0}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected zero retention to be valid, got error: %v", err)
 	}
 }
 

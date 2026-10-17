@@ -2,9 +2,9 @@ package k8s
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -213,7 +213,7 @@ func (s *Sweeper) cleanupPods(ctx context.Context, namespace string, cfg *config
 			})
 
 			if err != nil {
-				if !isProtectionDenial(err) {
+				if !errors.Is(err, guard.ErrProtected) {
 					s.logger.Error("failed to delete pod",
 						zap.String("pod", pod.Name),
 						zap.String("namespace", namespace),
@@ -346,7 +346,7 @@ func (s *Sweeper) cleanupJobs(ctx context.Context, namespace string, cfg *config
 		})
 
 		if err != nil {
-			if !isProtectionDenial(err) {
+			if !errors.Is(err, guard.ErrProtected) {
 				s.logger.Error("failed to delete job",
 					zap.String("job", job.Name),
 					zap.String("namespace", namespace),
@@ -433,7 +433,7 @@ func (s *Sweeper) cleanupPVCs(ctx context.Context, namespace string) (int, error
 		})
 
 		if err != nil {
-			if !isProtectionDenial(err) {
+			if !errors.Is(err, guard.ErrProtected) {
 				s.logger.Error("failed to delete PVC",
 					zap.String("pvc", pvc.Name),
 					zap.String("namespace", namespace),
@@ -450,16 +450,4 @@ func (s *Sweeper) cleanupPVCs(ctx context.Context, namespace string) (int, error
 	}
 
 	return removed, nil
-}
-
-// isProtectionDenial checks if an error is a protection denial
-func isProtectionDenial(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "deletion not approved") ||
-		strings.Contains(msg, "not allowed") ||
-		strings.Contains(msg, "critically protected") ||
-		strings.Contains(msg, "strictly protected")
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -142,8 +143,12 @@ func Load(path string, required bool) (*Config, error) {
 		}
 	}
 
-	// Environment variables override
+	// Environment variables override. The key replacer maps nested keys to
+	// env names (docker.prune_volumes -> AEGIS_DOCKER_PRUNE_VOLUMES); without
+	// it, AutomaticEnv never matches nested keys and those overrides are
+	// silently ignored.
 	v.SetEnvPrefix("AEGIS")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
 	var cfg Config
@@ -162,6 +167,12 @@ func (cfg *Config) Validate() error {
 
 	if cfg.Timeout < time.Second {
 		return fmt.Errorf("timeout must be at least 1 second")
+	}
+
+	// A negative retention window would invert the comparison in the sweeper
+	// and delete every finished job immediately, so reject it outright.
+	if cfg.Kubernetes.JobRetentionDays < 0 {
+		return fmt.Errorf("kubernetes.job_retention_days must not be negative")
 	}
 
 	if cfg.Notification.Enabled && cfg.Notification.WebhookURL == "" {

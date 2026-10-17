@@ -198,7 +198,7 @@ For a read-only review of what would be cleaned, use `aegis list` or
 
 ### Usage
 
-Aegis has three subcommands designed around a **check → clean → review** workflow:
+Aegis has four subcommands, built around a **check → clean → review** workflow:
 
 ```bash
 aegis                 # alias for `aegis clean` (backward compatible)
@@ -226,8 +226,10 @@ Passing `--types` shows only the Docker side; passing `--kinds` shows only the
 Kubernetes side. Omit both for everything, or combine them to filter each side.
 
 `--types` accepts Docker resources (`containers`, `images`, `volumes`,
-`networks`); `--kinds` accepts Kubernetes kinds (`pods`, `jobs`, `pvcs`). Cookbook
-examples:
+`networks`); `--kinds` accepts Kubernetes kinds (`pods`, `jobs`, `pvcs`). An
+explicit selection is honored even if that side is disabled in `config.yaml`;
+if both sides are disabled and no filters are passed, `aegis list` prints a hint
+instead of silently listing nothing. Cookbook examples:
 
 ```bash
 aegis list --types images                    # just Docker images
@@ -257,7 +259,7 @@ aegis check                       # notify only when disk crosses the configured
 aegis check --threshold 90        # alert only when disk hits 90% (overrides config)
 aegis check --config prod.yaml    # use a different config's webhook/threshold
 aegis check --log-level debug     # verbose output for troubleshooting
-aegis check --no-banner           # quiet, script-friendly output
+aegis check --log-level warn      # quieter output for cron/scripts
 ```
 
 ##### Setting the threshold

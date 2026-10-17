@@ -3,13 +3,20 @@ package guard
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 )
+
+// ErrProtected marks errors returned when a protection rule denied an action.
+// Callers use errors.Is to distinguish these expected denials from
+// operational failures (API errors, execution failures, ...).
+var ErrProtected = errors.New("action denied by protection rules")
 
 type Guard struct {
 	rules         *RuleSet
@@ -21,6 +28,9 @@ type Guard struct {
 	autoApprove   bool
 	strictMode    bool
 	overrideToken string
+
+	stdinOnce sync.Once
+	stdin     *bufio.Reader
 }
 
 // Config holds guard configuration
@@ -105,7 +115,7 @@ func (g *Guard) CheckAndExecute(ctx context.Context, resource *Resource, action 
 
 	// If not approved, return error
 	if !permission.Approved {
-		return fmt.Errorf("deletion not approved: %s", permission.Reason)
+		return fmt.Errorf("%w: %s", ErrProtected, permission.Reason)
 	}
 
 	// In dry run, just log and return
@@ -372,6 +382,18 @@ func (g *Guard) handleProtectionLevel(resource *Resource, rule *Rule, action str
 	}
 }
 
+// stdinReader returns a reader shared by all prompts in this guard. Sharing
+// one reader matters: a fresh bufio.Reader per prompt would discard whatever
+// the previous reader had already buffered, so answers piped to stdin ahead
+// of time (scripted runs answering several prompts) would be lost between
+// prompts.
+func (g *Guard) stdinReader() *bufio.Reader {
+	g.stdinOnce.Do(func() {
+		g.stdin = bufio.NewReader(os.Stdin)
+	})
+	return g.stdin
+}
+
 // promptForApproval prompts the user for approval
 func (g *Guard) promptForApproval(resource *Resource, rule *Rule, action string) (*Permission, error) {
 	fmt.Printf("\n🛡️  PROTECTION WARNING\n")
@@ -384,7 +406,7 @@ func (g *Guard) promptForApproval(resource *Resource, rule *Rule, action string)
 	fmt.Printf("Action: %s\n", action)
 	fmt.Printf("\nDo you want to proceed? (y/N): ")
 
-	reader := bufio.NewReader(os.Stdin)
+	reader := g.stdinReader()
 	input, err := reader.ReadString('\n')
 	if err != nil {
 		return nil, fmt.Errorf("failed to read input: %w", err)
@@ -442,7 +464,7 @@ func (g *Guard) confirmDestruction(resource *Resource, action string) (bool, err
 	}
 	fmt.Printf("\nAre you sure you want to %s this resource? (y/N): ", action)
 
-	reader := bufio.NewReader(os.Stdin)
+	reader := g.stdinReader()
 	input, err := reader.ReadString('\n')
 	if err != nil {
 		return false, fmt.Errorf("failed to read input: %w", err)

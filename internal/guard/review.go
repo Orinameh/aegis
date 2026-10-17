@@ -2,8 +2,11 @@ package guard
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -103,7 +106,9 @@ func (q *ReviewQueue) read() ([]ReviewEntry, error) {
 	return entries, nil
 }
 
-// write atomically writes the entries to the backing file.
+// write atomically replaces the backing file: the entries are written to a
+// temporary file in the same directory, synced, and renamed into place, so a
+// crash or a concurrent reader can never observe a partially written queue.
 func (q *ReviewQueue) write(entries []ReviewEntry) error {
 	if entries == nil {
 		entries = []ReviewEntry{}
@@ -114,5 +119,70 @@ func (q *ReviewQueue) write(entries []ReviewEntry) error {
 		return fmt.Errorf("failed to encode review queue: %w", err)
 	}
 
-	return os.WriteFile(q.path, data, 0644)
+	// Capture the mode of an existing queue file so replacing it does not
+	// loosen permissions the operator chose. New files are created with mode
+	// 0644 through the OS, so the process umask applies exactly as it did when
+	// this was a plain os.WriteFile call.
+	var (
+		existingMode os.FileMode
+		preserveMode bool
+	)
+	if info, err := os.Stat(q.path); err == nil {
+		existingMode = info.Mode().Perm()
+		preserveMode = true
+	}
+
+	tmp, err := createReviewQueueTemp(filepath.Dir(q.path), filepath.Base(q.path)+".tmp-")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary review queue file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	// Best-effort cleanup for every path that does not end in a successful
+	// rename; after a successful rename this file no longer exists.
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to write review queue: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to sync review queue: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close review queue: %w", err)
+	}
+
+	if preserveMode {
+		if err := os.Chmod(tmpPath, existingMode); err != nil {
+			return fmt.Errorf("failed to preserve review queue permissions: %w", err)
+		}
+	}
+
+	if err := os.Rename(tmpPath, q.path); err != nil {
+		return fmt.Errorf("failed to replace review queue: %w", err)
+	}
+	return nil
+}
+
+// createReviewQueueTemp creates the temporary file used to atomically replace
+// the review queue. Unlike os.CreateTemp it opens the file with mode 0644, so
+// the kernel applies the process umask at creation time — the same semantics
+// the plain os.WriteFile this package replaced had. The name is unique per
+// process, clock tick, and attempt; O_EXCL guards against collisions.
+func createReviewQueueTemp(dir, prefix string) (*os.File, error) {
+	var lastErr error
+	for attempt := 0; attempt < 10; attempt++ {
+		name := fmt.Sprintf("%s%d-%d-%d", prefix, os.Getpid(), time.Now().UnixNano(), attempt)
+		f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err == nil {
+			return f, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
