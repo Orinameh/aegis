@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- ntfy notifications now POST a plain-text message to the configured topic URL. The previous JSON payload only worked when posted to the ntfy root URL with a `topic` field, so the documented `ntfy.sh/<topic>` webhook setup failed.
+- Nested environment overrides such as `AEGIS_DOCKER_PRUNE_VOLUMES` and `AEGIS_KUBERNETES_JOB_RETENTION_DAYS` are now applied; previously only top-level keys could be overridden.
+- Interactive prompts reuse a single stdin reader, so answers piped or typed ahead for consecutive prompts are no longer dropped.
+- Protection denials are now detected with a typed error instead of matching error text, so unrelated operational errors are no longer silently treated as denials.
+- The review queue file is replaced atomically (write to a temp file, then rename), so a crash mid-write can no longer truncate it.
+- `aegis check` logs a warning instead of ignoring an unreadable review queue.
+- Runtime errors from `aegis check`, `aegis review`, and `aegis list` no longer dump the full command usage; every subcommand now reports failures as a single `Error:` line.
+- Stray positional arguments (e.g. `aegis check stray`, `aegis review clear`) are rejected instead of being silently ignored.
+- `aegis list --types/--kinds` is honored even when that side is disabled in config; with both sides disabled and no filters, a hint is printed instead of silently listing nothing.
+
+### Added
+- Config validation rejects a negative `kubernetes.job_retention_days`.
+- Unit tests for `cmd/aegis` helpers: clean scoping, list filters, byte formatting, and custom-rule conversion.
+
+### Changed
+- Updated dependencies: `k8s.io/*` v0.37.1, `github.com/moby/moby/client` v0.6.2, `golang.org/x/sys` v0.49.0, and transitive updates (OpenTelemetry v1.47, `golang.org/x/net` v0.61).
+
 ## [0.1.1] - 2026-08-14
 
 ### Added

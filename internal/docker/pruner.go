@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -195,7 +196,7 @@ func (p *Pruner) pruneContainers(ctx context.Context) (uint64, int, error) {
 		})
 
 		if err != nil {
-			if !isProtectionDenial(err) {
+			if !errors.Is(err, guard.ErrProtected) {
 				p.logger.Error("failed to delete container",
 					zap.String("container", containerName),
 					zap.Error(err),
@@ -269,7 +270,7 @@ func (p *Pruner) pruneImages(ctx context.Context) (uint64, int, error) {
 		})
 
 		if err != nil {
-			if !isProtectionDenial(err) {
+			if !errors.Is(err, guard.ErrProtected) {
 				p.logger.Error("failed to delete image",
 					zap.String("image", imageName),
 					zap.Error(err),
@@ -330,7 +331,7 @@ func (p *Pruner) pruneBuildCache(ctx context.Context) (uint64, int, error) {
 	})
 
 	if err != nil {
-		if !isProtectionDenial(err) {
+		if !errors.Is(err, guard.ErrProtected) {
 			return 0, 0, fmt.Errorf("failed to prune build cache: %w", err)
 		}
 		p.logger.Debug("build cache protected, skipping", zap.Error(err))
@@ -413,7 +414,7 @@ func (p *Pruner) pruneNetworks(ctx context.Context) (uint64, int, error) {
 		})
 
 		if err != nil {
-			if !isProtectionDenial(err) {
+			if !errors.Is(err, guard.ErrProtected) {
 				p.logger.Error("failed to delete network",
 					zap.String("network", network.Name),
 					zap.Error(err),
@@ -495,7 +496,7 @@ func (p *Pruner) pruneVolumes(ctx context.Context) (uint64, int, error) {
 		})
 
 		if err != nil {
-			if !isProtectionDenial(err) {
+			if !errors.Is(err, guard.ErrProtected) {
 				p.logger.Error("failed to delete volume",
 					zap.String("volume", vol.Name),
 					zap.Error(err),
@@ -515,18 +516,6 @@ func (p *Pruner) pruneVolumes(ctx context.Context) (uint64, int, error) {
 	)
 
 	return totalSpaceReclaimed, prunedCount, nil
-}
-
-// isProtectionDenial checks if an error is a protection denial
-func isProtectionDenial(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "deletion not approved") ||
-		strings.Contains(msg, "not allowed") ||
-		strings.Contains(msg, "critically protected") ||
-		strings.Contains(msg, "strictly protected")
 }
 
 // humanizeBytes converts bytes to human-readable format

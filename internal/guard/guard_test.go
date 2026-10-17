@@ -2,8 +2,11 @@ package guard
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -311,6 +314,38 @@ func TestInteractiveAutoApproveSkipsConfirmation(t *testing.T) {
 	}
 }
 
+func TestInteractiveSequentialPromptsKeepTypeAhead(t *testing.T) {
+	g := newTestGuard(t, &Config{Interactive: true})
+
+	// Both answers are written to stdin before the first prompt reads. A
+	// fresh reader per prompt would swallow the second answer into the first
+	// reader's buffer; the shared reader must consume both lines in order.
+	oldStdin := os.Stdin
+	os.Stdin = newReadCloser("y\ny\n")
+	defer func() { os.Stdin = oldStdin }()
+
+	for i := 0; i < 2; i++ {
+		resource := &Resource{
+			Type:      ResourceContainer,
+			Name:      fmt.Sprintf("my-app-container-%d", i),
+			Namespace: "docker",
+			Labels:    map[string]string{},
+		}
+
+		executed := false
+		err := g.CheckAndExecute(context.Background(), resource, "delete", func() error {
+			executed = true
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("prompt %d: expected approval from piped stdin, got error: %v", i+1, err)
+		}
+		if !executed {
+			t.Fatalf("prompt %d: expected execute callback to run", i+1)
+		}
+	}
+}
+
 func TestCriticalDenialEnqueuesReview(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "review.json")
 	g := newTestGuard(t, &Config{Interactive: false, ReviewQueuePath: path})
@@ -351,6 +386,38 @@ func TestOverrideTokenAllowsStrictResource(t *testing.T) {
 	}
 	if !executed {
 		t.Error("expected execute callback to run")
+	}
+}
+
+func TestProtectedDenialsWrapErrProtected(t *testing.T) {
+	g := newTestGuard(t, &Config{Interactive: false})
+
+	err := g.CheckAndExecute(context.Background(), orchestrationContainer(), "delete", func() error {
+		t.Error("execute should not run for denied strict resource")
+		return nil
+	})
+	if !errors.Is(err, ErrProtected) {
+		t.Fatalf("expected denial to wrap ErrProtected, got %v", err)
+	}
+}
+
+func TestExecutionFailuresAreNotProtectionDenials(t *testing.T) {
+	g := newTestGuard(t, &Config{Interactive: false})
+	resource := &Resource{
+		Type:      ResourceContainer,
+		Name:      "my-app-container",
+		Namespace: "docker",
+		Labels:    map[string]string{},
+	}
+
+	err := g.CheckAndExecute(context.Background(), resource, "delete", func() error {
+		return errors.New("docker daemon exploded")
+	})
+	if err == nil {
+		t.Fatal("expected execution failure")
+	}
+	if errors.Is(err, ErrProtected) {
+		t.Fatalf("execution failure must not classify as a protection denial: %v", err)
 	}
 }
 
@@ -439,6 +506,55 @@ func TestReviewQueueRoundTrip(t *testing.T) {
 	entries, _ = q.List()
 	if len(entries) != 0 {
 		t.Fatalf("expected empty queue after clear, got %d", len(entries))
+	}
+}
+
+func TestReviewQueueWriteLeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "review.json")
+	q := NewReviewQueue(path)
+
+	if err := q.Enqueue(&ReviewEntry{Resource: "docker/container"}); err != nil {
+		t.Fatalf("Enqueue returned error: %v", err)
+	}
+	if err := q.Clear(); err != nil {
+		t.Fatalf("Clear returned error: %v", err)
+	}
+
+	leftovers, err := filepath.Glob(filepath.Join(dir, "review.json.tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Fatalf("expected no temporary files left behind, found %v", leftovers)
+	}
+}
+
+func TestReviewQueuePreservesExistingPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows only tracks the read-only attribute; POSIX mode bits are not preserved")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "review.json")
+	q := NewReviewQueue(path)
+
+	if err := q.Enqueue(&ReviewEntry{Resource: "docker/container"}); err != nil {
+		t.Fatalf("Enqueue returned error: %v", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatalf("failed to chmod queue file: %v", err)
+	}
+	if err := q.Enqueue(&ReviewEntry{Resource: "docker/container-2"}); err != nil {
+		t.Fatalf("Enqueue returned error: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("failed to stat queue file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("expected existing permissions 0600 to be preserved, got %04o", got)
 	}
 }
 

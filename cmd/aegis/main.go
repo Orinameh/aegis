@@ -34,7 +34,7 @@ var (
 	noBanner          bool
 	bannerStyle       string
 	thresholdOverride int
-	version           = "0.1.1"
+	version           = "0.1.2"
 )
 
 // rootCmd represents the base command. For backward compatibility, bare
@@ -59,12 +59,7 @@ enabled resource by default; pass a scope flag (e.g. --docker-only, --images-onl
 	CompletionOptions: cobra.CompletionOptions{
 		DisableDefaultCmd: true,
 	},
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := runClean(cmd); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-	},
+	Run: exitOnError(runClean),
 }
 
 var checkCmd = &cobra.Command{
@@ -78,16 +73,16 @@ Exit codes:
   0 - check ran and disk is below the threshold (or notification is disabled)
   2 - check ran and disk usage exceeded the threshold
   1 - a real error occurred (could not read disk, could not send notification)`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Args: cobra.NoArgs,
+	Run: exitOnError(func(cmd *cobra.Command) error {
 		exceeded, err := runCheck(cmd)
-		if err != nil {
-			return err
-		}
-		if exceeded {
+		if err == nil && exceeded {
+			// Exit code 2 signals "threshold exceeded", distinct from 1
+			// (real error), so schedulers can alert on it.
 			os.Exit(2)
 		}
-		return nil
-	},
+		return err
+	}),
 }
 
 var cleanCmd = &cobra.Command{
@@ -104,12 +99,8 @@ By default every enabled resource is cleaned. Use a scope flag to clean only
 one kind of resource (k8s-only, images-only, containers-only, etc.). At most
 one scope flag may be set; scoping is purely CLI-side and does not change
 config.yaml.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := runClean(cmd); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-	},
+	Args: cobra.NoArgs,
+	Run:  exitOnError(runClean),
 }
 
 var reviewCmd = &cobra.Command{
@@ -120,9 +111,10 @@ non-interactive runs and queued for human review.
 
   aegis review          list pending items
   aegis review --clear  empty the review queue`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Args: cobra.NoArgs,
+	Run: exitOnError(func(cmd *cobra.Command) error {
 		return runReview(cmd, reviewClear)
-	},
+	}),
 }
 
 var listCmd = &cobra.Command{
@@ -134,9 +126,8 @@ in aligned tables. Performs no mutations, so it is safe to run at any time.
   aegis list                       list everything
   aegis list --types containers    list only Docker containers
   aegis list --kinds pods          list only Kubernetes pods`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runList(cmd)
-	},
+	Args: cobra.NoArgs,
+	Run:  exitOnError(runList),
 }
 
 var (
@@ -186,6 +177,20 @@ func init() {
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
+	}
+}
+
+// exitOnError adapts a run function for cobra's Run field. Runtime errors are
+// printed as a single line on stderr and exit with status 1. This is
+// deliberately not a RunE: cobra appends the full command usage to every error
+// returned from RunE, which is noise for runtime failures (missing config,
+// unreachable webhook, ...) that the usage text cannot help with.
+func exitOnError(run func(cmd *cobra.Command) error) func(cmd *cobra.Command, args []string) {
+	return func(cmd *cobra.Command, args []string) {
+		if err := run(cmd); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -293,7 +298,12 @@ func runCheck(cmd *cobra.Command) (bool, error) {
 		return true, nil
 	}
 
-	pending, _ := guard.NewReviewQueue(cfg.Protection.ReviewQueuePath).CountPending()
+	pending, err := guard.NewReviewQueue(cfg.Protection.ReviewQueuePath).CountPending()
+	if err != nil {
+		// A corrupt or unreadable queue must not hide the disk alert; carry
+		// on with the notification and just surface the problem.
+		log.Warn("failed to read review queue", zap.Error(err))
+	}
 
 	msg := fmt.Sprintf("🛡️ Aegis: disk usage at %.1f%% (threshold %d%%)\nUsed: %s / %s",
 		usage.UsedPercent, cfg.MaxDiskUsage,
@@ -489,12 +499,15 @@ func runList(cmd *cobra.Command) error {
 	wantK8s := func(t string) bool { return contains(listK8sKinds, t) || len(listK8sKinds) == 0 }
 
 	// Filter scoping: --types requests Docker resources, --kinds requests
-	// Kubernetes resources. When only one side is requested, render only
-	// that side; when neither is given, show everything.
-	onlyDocker := len(listDockerTypes) > 0 && len(listK8sKinds) == 0
-	onlyK8s := len(listK8sKinds) > 0 && len(listDockerTypes) == 0
+	// Kubernetes resources. Explicit filters are honored even when that side
+	// is disabled in config; without filters, only enabled sides are listed.
+	wantDockerSide, wantK8sSide := selectListTargets(cfg.EnableDockerPrune, cfg.EnableK8sPrune, listDockerTypes, listK8sKinds)
+	if !wantDockerSide && !wantK8sSide {
+		fmt.Println("Nothing to list: Docker and Kubernetes are both disabled in config (enable_docker_prune / enable_k8s_prune). Pass --types or --kinds to list a specific side.")
+		return nil
+	}
 
-	if cfg.EnableDockerPrune && !onlyK8s && (len(listDockerTypes) == 0 || anyRequested(listDockerTypes, "containers", "images", "volumes", "networks")) {
+	if wantDockerSide {
 		pruner, err := docker.NewPruner(log, nil)
 		if err != nil {
 			log.Error("failed to create Docker pruner", zap.Error(err))
@@ -509,7 +522,7 @@ func runList(cmd *cobra.Command) error {
 		renderDockerTables(wantDocker, inv)
 	}
 
-	if cfg.EnableK8sPrune && !onlyDocker && (len(listK8sKinds) == 0 || anyRequested(listK8sKinds, "pods", "jobs", "pvcs")) {
+	if wantK8sSide {
 		sweeper, err := k8s.NewSweeper(log, nil)
 		if err != nil {
 			log.Error("failed to create Kubernetes sweeper", zap.Error(err))
@@ -525,6 +538,25 @@ func runList(cmd *cobra.Command) error {
 	}
 
 	return nil
+}
+
+// selectListTargets decides which inventories `aegis list` queries. A side is
+// queried when it is enabled in config or explicitly requested via
+// --types/--kinds. Requesting only one side restricts the output to that side,
+// matching the documented behavior.
+func selectListTargets(enableDocker, enableK8s bool, dockerTypes, k8sKinds []string) (wantDocker, wantK8s bool) {
+	wantDocker = enableDocker || len(dockerTypes) > 0
+	wantK8s = enableK8s || len(k8sKinds) > 0
+
+	onlyDocker := len(dockerTypes) > 0 && len(k8sKinds) == 0
+	onlyK8s := len(k8sKinds) > 0 && len(dockerTypes) == 0
+	if onlyDocker {
+		wantK8s = false
+	}
+	if onlyK8s {
+		wantDocker = false
+	}
+	return wantDocker, wantK8s
 }
 
 func renderDockerTables(want func(string) bool, inv *docker.Inventory) {
@@ -648,20 +680,6 @@ func contains(list []string, v string) bool {
 	for _, item := range list {
 		if item == v {
 			return true
-		}
-	}
-	return false
-}
-
-// anyRequested reports whether at least one of the given known values was
-// explicitly requested via the filters. Always true when nothing is
-// requested (which means "everything").
-func anyRequested(selected []string, known ...string) bool {
-	for _, v := range selected {
-		for _, k := range known {
-			if v == k {
-				return true
-			}
 		}
 	}
 	return false
